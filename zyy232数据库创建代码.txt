@@ -1,0 +1,644 @@
+--创建用户
+conn sys/Xx123456 as sysdba
+declare cc int; begin
+  select count(*) into cc from dba_users where username='ZYY232';
+  if cc=1 then execute immediate 'drop user zyy232 cascade' ; end if;
+end;
+/
+create user zyy232 identified by 232 default tablespace users quota 100m on users account unlock;
+grant create session, create table, create view, create procedure, create trigger to zyy232;
+
+--创建和插入表
+conn zyy232/232
+declare cc int; begin
+  select count(*) into cc from user_tables where table_name='学生';
+  if cc=1 then execute immediate 'drop table 学生'; end if;
+  select count(*) into cc from user_tables where table_name='图书';
+  if cc=1 then execute immediate 'drop table 图书'; end if;
+  select count(*) into cc from user_tables where table_name='作者';
+  if cc=1 then execute immediate 'drop table 作者'; end if;
+  select count(*) into cc from user_tables where table_name='类别';
+  if cc=1 then execute immediate 'drop table 类别'; end if;
+  select count(*) into cc from user_tables where table_name='借书记录';
+  if cc=1 then execute immediate 'drop table 借书记录'; end if;
+  select count(*) into cc from user_tables where table_name='还书记录';
+  if cc=1 then execute immediate 'drop table 还书记录'; end if;
+  select count(*) into cc from user_tables where table_name='书架';
+  if cc=1 then execute immediate 'drop table 书架'; end if;
+  select count(*) into cc from user_tables where table_name='员工';
+  if cc=1 then execute immediate 'drop table 员工'; end if;
+end;
+/
+CREATE TABLE 员工(
+  员工编号 char(8) primary key,
+  员工姓名 char(8),
+  员工性别 char(8),
+  联系方式 char(20)
+);
+CREATE TABLE 学生(
+  学号 char(8) primary key,
+  学生姓名 char(8),
+  学生性别 char(8),
+  年龄 int,
+  电话 char(20)
+);
+CREATE TABLE 图书(
+  图书编号 char(8) primary key, 
+  书名 char(50),
+  类别编号 char(8),
+  书架编号 char(8),
+  作者编号 char(8),
+  价格 float,
+  数量 int,
+  出版社 char(50)
+);
+CREATE TABLE 作者(
+  作者编号 char(8) primary key,
+  作者姓名 char(50),
+  国籍 char(50)
+);
+CREATE TABLE 类别(
+  类别编号 char(8) primary key,
+  类别名 char(20)
+);
+CREATE TABLE 借书记录(
+  借记编号 char(8) primary key,
+  学号 char(8),
+  图书编号 char(8),
+  员工编号 char(8),
+  归还 char(1),
+  借阅日期 date
+);
+CREATE TABLE 还书记录(
+  还记编号 char(8) primary key,
+  学号 char(8),
+  图书编号 char(8),
+  员工编号 char(8),
+  归还日期 date
+);
+CREATE TABLE 书架(
+  书架编号 char(8) primary key,
+  位置 char(8)
+);
+
+CREATE OR REPLACE VIEW 作者视图 AS 
+  SELECT a.作者编号, a.作者姓名, a.国籍, b.书名
+  FROM 图书 b, 作者 a 
+  where b.作者编号 = a.作者编号;
+
+CREATE OR REPLACE VIEW 图书视图 AS 
+  SELECT b.图书编号, d.位置, b.书名, c.类别名, a.作者姓名, b.数量, b.价格, b.出版社
+  FROM 图书 b, 作者 a, 类别 c, 书架 d
+  WHERE b.作者编号 = a.作者编号 AND b.类别编号 = c.类别编号 AND b.书架编号=d.书架编号;
+
+CREATE OR REPLACE VIEW 借书记录视图 AS
+  SELECT d.借记编号,a.学生姓名,b.员工姓名,c.书名,d.借阅日期
+  FROM 学生 a,员工 b,图书 c,借书记录 d
+  WHERE a.学号=d.学号 AND b.员工编号=d.员工编号 AND c.图书编号= d.图书编号;
+
+CREATE OR REPLACE VIEW 还书记录视图 AS
+  SELECT d.还记编号,a.学生姓名,b.员工姓名,c.书名,d.归还日期
+  FROM 学生 a,员工 b,图书 c,还书记录 d
+  WHERE a.学号=d.学号 AND b.员工编号=d.员工编号 AND c.图书编号= d.图书编号;
+
+CREATE OR REPLACE VIEW 借出图书视图 AS
+  SELECT c.图书编号,a.学生姓名,c.书名,b.借阅日期
+  FROM 学生 a,图书 c,借书记录 b
+  WHERE a.学号=b.学号 AND c.图书编号= b.图书编号 AND b.归还='0';
+
+--触发器，限制性别为男女
+CREATE OR REPLACE TRIGGER 学生性别限制
+BEFORE INSERT OR UPDATE ON 学生
+FOR EACH ROW
+BEGIN
+  IF (:NEW.学生性别 not in('男','女')) THEN
+    dbms_output.put_line('性别不合法！');
+    RAISE_APPLICATION_ERROR(-20004,'!!!');
+  END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER 员工性别限制
+BEFORE INSERT OR UPDATE ON 员工
+FOR EACH ROW
+BEGIN
+  IF (:NEW.员工性别 not in('男','女')) THEN
+    dbms_output.put_line('性别不合法！');
+    RAISE_APPLICATION_ERROR(-20004,'!!!');
+  END IF;
+END;
+/
+
+--创建存储过程
+CREATE OR REPLACE PROCEDURE 借书 (
+  v_st out int,
+  V_借记编号 借书记录.借记编号%type,
+  V_图书编号 图书.图书编号%type,
+  V_员工编号 员工.员工编号%type,
+  V_学号 学生.学号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_图书编号))='' OR V_图书编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_员工编号))='' OR V_员工编号 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_借记编号))='' OR V_借记编号 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_学号))='' OR V_学号 IS NULL THEN v_st:=4;return;END IF;
+  
+  SELECT count(*) into cc FROM 借书记录 WHERE 借记编号=V_借记编号;
+  If cc<>0 THEN v_st:=5;return;END IF; 
+  SELECT count(*) into cc FROM 图书 WHERE 图书编号=V_图书编号;
+  If cc=0 THEN v_st:=6;return;END IF; 
+  SELECT count(*) into cc FROM 学生 WHERE 学号=V_学号;
+  If cc=0 THEN v_st:=7;return;END IF;
+  SELECT count(*) into cc FROM 员工 WHERE 员工编号=V_员工编号;
+  If cc=0 THEN v_st:=8;return;END IF;
+  
+  SELECT 数量 INTO cc FROM 图书 WHERE 图书编号 = V_图书编号;
+  IF cc <= 0 THEN v_st:= 9;return;END IF;
+  UPDATE 图书 SET 数量 = (SELECT 数量 FROM 图书 WHERE 图书编号 = V_图书编号) - 1 
+  WHERE 图书编号 = V_图书编号;
+  insert into 借书记录 values(V_借记编号,V_学号,V_图书编号,V_员工编号,'0',sysdate);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 还书 (
+  v_st out int,
+  V_还记编号 还书记录.还记编号%type,
+  V_借记编号 借书记录.借记编号%type,
+  V_图书编号 图书.图书编号%type,
+  V_员工编号 员工.员工编号%type,
+  V_学号 学生.学号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_图书编号))='' OR V_图书编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_员工编号))='' OR V_员工编号 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_还记编号))='' OR V_还记编号 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_借记编号))='' OR V_借记编号 IS NULL THEN v_st:=4;return;END IF;
+  If LTrim(RTrim(V_学号))='' OR V_学号 IS NULL THEN v_st:=4;return;END IF;
+  
+  SELECT count(*) into cc FROM 还书记录 WHERE 还记编号=V_还记编号;
+  If cc<>0 THEN v_st:=5;return;END IF; 
+  SELECT count(*) into cc FROM 图书 WHERE 图书编号=V_图书编号;
+  If cc=0 THEN v_st:=6;return;END IF; 
+  SELECT count(*) into cc FROM 学生 WHERE 学号=V_学号;
+  If cc=0 THEN v_st:=7;return;END IF;
+  SELECT count(*) into cc FROM 员工 WHERE 员工编号=V_员工编号;
+  If cc=0 THEN v_st:=8;return;END IF;
+  
+  UPDATE 图书 SET 数量 = (SELECT 数量 FROM 图书 WHERE 图书编号 = V_图书编号) + 1 
+  WHERE 图书编号 = V_图书编号;
+  UPDATE 借书记录 SET 归还 = '1'
+  WHERE 借记编号 = V_借记编号;
+  insert into 还书记录 values(V_还记编号,V_学号,V_图书编号,V_员工编号,sysdate);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 图书采购 (
+  v_st out int,
+  V_书名 图书.书名%type,
+  V_图书编号 图书.图书编号%type,
+  V_类别名 类别.类别名%type,
+  V_类别编号 图书.类别编号%type,
+  V_书架编号 图书.书架编号%type,
+  V_作者姓名 作者.作者姓名%type,
+  V_作者编号 图书.作者编号%type,
+  V_国籍 作者.国籍%type,
+  V_出版社 图书.出版社%type,
+  V_价格 float,
+  V_数量 int)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_图书编号))='' OR V_图书编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_书名))='' OR V_书名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_数量))='' OR V_数量 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_类别编号))='' OR V_类别编号 IS NULL THEN v_st:=4;return;END IF;
+  If LTrim(RTrim(V_类别名))='' OR V_类别名 IS NULL THEN v_st:=5;return;END IF;
+  If LTrim(RTrim(V_书架编号))='' OR V_书架编号 IS NULL THEN v_st:=6;return;END IF;
+  If LTrim(RTrim(V_作者编号))='' OR V_作者编号 IS NULL THEN v_st:=7;return;END IF;
+  If LTrim(RTrim(V_作者姓名))='' OR V_作者姓名 IS NULL THEN v_st:=8;return;END IF;
+  If LTrim(RTrim(V_国籍))='' OR V_国籍 IS NULL THEN v_st:=9;return;END IF;
+  If LTrim(RTrim(V_价格))='' OR V_价格 IS NULL THEN v_st:=10;return;END IF;
+  If LTrim(RTrim(V_出版社))='' OR V_出版社 IS NULL THEN v_st:=11;return;END IF;
+
+--书不是已有的话进行插入  
+  SELECT count(*) into cc FROM 图书 WHERE 图书编号=V_图书编号;
+  If cc=0 THEN
+    insert into 图书 values(V_图书编号,V_书名,V_类别编号,V_书架编号, v_作者编号, v_价格, v_数量, v_出版社);
+    SELECT count(*) into cc FROM 类别 WHERE 类别编号=V_类别编号;
+    If cc=0 THEN
+      insert into 类别 values(V_类别编号,V_类别名);END IF;
+    SELECT count(*) into cc FROM 作者 WHERE 作者编号=V_作者编号;
+    If cc=0 THEN 
+      insert into 作者 values(V_作者编号,V_作者姓名,V_国籍);END IF;
+  return;END IF;
+  
+  UPDATE 图书 SET 数量 = (SELECT 数量 FROM 图书 WHERE 图书编号 = V_图书编号) + V_数量
+  WHERE 图书编号 = V_图书编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 图书信息修改 (
+  v_st out int,
+  V_书名 图书.书名%type,
+  V_图书编号 图书.图书编号%type,
+  V_类别编号 图书.类别编号%type,
+  V_书架编号 图书.书架编号%type,
+  V_作者编号 图书.作者编号%type,
+  V_出版社 图书.出版社%type,
+  V_价格 float,
+  V_数量 int)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_图书编号))='' OR V_图书编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_书名))='' OR V_书名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_数量))='' OR V_数量 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_类别编号))='' OR V_类别编号 IS NULL THEN v_st:=4;return;END IF;
+  If LTrim(RTrim(V_书架编号))='' OR V_书架编号 IS NULL THEN v_st:=5;return;END IF;
+  If LTrim(RTrim(V_作者编号))='' OR V_作者编号 IS NULL THEN v_st:=6;return;END IF;
+  If LTrim(RTrim(V_价格))='' OR V_价格 IS NULL THEN v_st:=7;return;END IF;
+  If LTrim(RTrim(V_出版社))='' OR V_出版社 IS NULL THEN v_st:=8;return;END IF;
+ 
+  SELECT count(*) into cc FROM 图书 WHERE 图书编号=V_图书编号;
+  If cc=0 THEN v_st:=9;return;END IF;
+  SELECT count(*) into cc FROM 图书 WHERE 类别编号=V_类别编号;
+  If cc=0 THEN v_st:=10;return;END IF;
+  SELECT count(*) into cc FROM 图书 WHERE 书架编号=V_书架编号;
+  If cc=0 THEN v_st:=11;return;END IF;
+  SELECT count(*) into cc FROM 图书 WHERE 作者编号=V_作者编号;
+  If cc=0 THEN v_st:=12;return;END IF;
+  
+  UPDATE 图书 set 书名=V_书名,类别编号=V_类别编号,书架编号=V_书架编号,作者编号=V_作者编号,价格=v_价格,出版社=v_出版社
+  WHERE 图书编号 = V_图书编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 图书信息删除 (
+  v_st out int,
+  V_图书编号 图书.图书编号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_图书编号))='' OR V_图书编号 IS NULL THEN v_st:=1;return;END IF;
+ 
+  SELECT count(*) into cc FROM 图书 WHERE 图书编号=V_图书编号;
+  If cc=0 THEN v_st:=9;return;END IF;
+  SELECT count(*) into cc FROM 借书记录 a,还书记录 b WHERE a.图书编号=V_图书编号 AND b.图书编号=V_图书编号 AND b.归还日期< a.借阅日期;
+  If cc=0 THEN v_st:=10;return;END IF;
+  
+  DELETE from 图书 where 图书编号=V_图书编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 学生信息插入 (
+  v_st out int,
+  V_学号 学生.学号%type,
+  V_学生姓名 学生.学生姓名%type,
+  V_学生性别 学生.学生性别%type,
+  V_年龄 int,
+  V_电话 学生.电话%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_学生姓名))='' OR V_学生姓名 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_学生性别))='' OR V_学生性别 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_年龄))='' OR V_年龄 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_学号))='' OR V_学号 IS NULL THEN v_st:=4;return;END IF;
+  If LTrim(RTrim(V_电话))='' OR V_电话 IS NULL THEN v_st:=5;return;END IF;
+  
+  SELECT count(*) into cc FROM 学生 WHERE 学号=V_学号;
+  If cc<>0 THEN v_st:=6;return;END IF;
+  
+  insert into 学生 values(V_学号,V_学生姓名,V_学生性别,V_年龄,V_电话);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 学生信息修改 (
+  v_st out int,
+  V_学号 学生.学号%type,
+  V_学生姓名 学生.学生姓名%type,
+  V_学生性别 学生.学生性别%type,
+  V_年龄 int,
+  V_电话 学生.电话%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_学生姓名))='' OR V_学生姓名 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_学生性别))='' OR V_学生性别 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_年龄))='' OR V_年龄 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_学号))='' OR V_学号 IS NULL THEN v_st:=4;return;END IF;
+  If LTrim(RTrim(V_电话))='' OR V_电话 IS NULL THEN v_st:=5;return;END IF;
+  
+  SELECT count(*) into cc FROM 学生 WHERE 学号=V_学号;
+  If cc=0 THEN v_st:=6;return;END IF;
+  
+  update 学生 set 学生姓名=V_学生姓名,学生性别=V_学生性别,年龄=V_年龄,电话=V_电话
+  where 学号=V_学号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 学生信息删除 (
+  v_st out int,
+  V_学号 学生.学号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_学号))='' OR V_学号 IS NULL THEN v_st:=5;return;END IF;
+  
+  SELECT count(*) into cc FROM 学生 WHERE 学号=V_学号;
+  If cc=0 THEN v_st:=6;return;END IF;
+  
+  DELETE from 学生 where 学号=V_学号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 员工信息插入 (
+  v_st out int,
+  V_员工编号 员工.员工编号%type,
+  V_员工姓名 员工.员工姓名%type,
+  V_员工性别 员工.员工性别%type,
+  V_联系方式 员工.联系方式%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_员工编号))='' OR V_员工编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_员工姓名))='' OR V_员工姓名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_员工性别))='' OR V_员工性别 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_联系方式))='' OR V_联系方式 IS NULL THEN v_st:=4;return;END IF;
+  
+  SELECT count(*) into cc FROM 员工 WHERE 员工编号=V_员工编号;
+  If cc<>0 THEN v_st:=5;return;END IF;
+  
+  insert into 员工 values(V_员工编号,V_员工姓名,V_员工性别,V_联系方式);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 员工信息修改 (
+  v_st out int,
+  V_员工编号 员工.员工编号%type,
+  V_员工姓名 员工.员工姓名%type,
+  V_员工性别 员工.员工性别%type,
+  V_联系方式 员工.联系方式%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_员工编号))='' OR V_员工编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_员工姓名))='' OR V_员工姓名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_员工性别))='' OR V_员工性别 IS NULL THEN v_st:=3;return;END IF;
+  If LTrim(RTrim(V_联系方式))='' OR V_联系方式 IS NULL THEN v_st:=4;return;END IF;
+  
+  SELECT count(*) into cc FROM 员工 WHERE 员工编号=V_员工编号;
+  If cc=0 THEN v_st:=5;return;END IF;
+  
+  update 员工 set 员工姓名=V_员工姓名,员工性别=V_员工性别,联系方式=V_联系方式
+  where 员工编号=V_员工编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 员工信息删除 (
+  v_st out int,
+  V_员工编号 员工.员工编号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_员工编号))='' OR V_员工编号 IS NULL THEN v_st:=1;return;END IF;
+  
+  SELECT count(*) into cc FROM 员工 WHERE 员工编号=V_员工编号;
+  If cc=0 THEN v_st:=5;return;END IF;
+  
+  delete from  员工 where 员工编号=V_员工编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 类别信息插入 (
+  v_st out int,
+  V_类别编号 类别.类别编号%type,
+  V_类别名 类别.类别名%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_类别编号))='' OR V_类别编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_类别名))='' OR V_类别名 IS NULL THEN v_st:=2;return;END IF;
+  
+  SELECT count(*) into cc FROM 类别 WHERE 类别编号=V_类别编号;
+  If cc<>0 THEN v_st:=3;return;END IF;
+  
+  insert into 类别 values(V_类别编号,V_类别名);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 类别信息修改 (
+  v_st out int,
+  V_类别编号 类别.类别编号%type,
+  V_类别名 类别.类别名%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_类别编号))='' OR V_类别编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_类别名))='' OR V_类别名 IS NULL THEN v_st:=2;return;END IF;
+  
+  SELECT count(*) into cc FROM 类别 WHERE 类别编号=V_类别编号;
+  If cc=0 THEN v_st:=3;return;END IF;
+  
+  update 类别 set 类别名=V_类别名 where 类别编号=V_类别编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 类别信息删除 (
+  v_st out int,
+  V_类别编号 类别.类别编号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_类别编号))='' OR V_类别编号 IS NULL THEN v_st:=1;return;END IF;
+  
+  SELECT count(*) into cc FROM 类别 WHERE 类别编号=V_类别编号;
+  If cc=0 THEN v_st:=2;return;END IF;
+  
+  DELETE from 类别 where 类别编号=V_类别编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 作者信息插入 (
+  v_st out int,
+  V_作者编号 作者.作者编号%type,
+  V_作者姓名 作者.作者姓名%type,
+  V_国籍 作者.国籍%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_作者编号))='' OR V_作者编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_作者姓名))='' OR V_作者姓名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_国籍))='' OR V_国籍 IS NULL THEN v_st:=3;return;END IF;
+  
+  SELECT count(*) into cc FROM 作者 WHERE 作者编号=V_作者编号;
+  If cc<>0 THEN v_st:=4;return;END IF;
+  
+  insert into 作者 values(V_作者编号,V_作者姓名,V_国籍);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 作者信息修改 (
+  v_st out int,
+  V_作者编号 作者.作者编号%type,
+  V_作者姓名 作者.作者姓名%type,
+  V_国籍 作者.国籍%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_作者编号))='' OR V_作者编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_作者姓名))='' OR V_作者姓名 IS NULL THEN v_st:=2;return;END IF;
+  If LTrim(RTrim(V_国籍))='' OR V_国籍 IS NULL THEN v_st:=3;return;END IF;
+  
+  SELECT count(*) into cc FROM 作者 WHERE 作者编号=V_作者编号;
+  If cc=0 THEN v_st:=4;return;END IF;
+  
+  update 作者 set 作者姓名=V_作者姓名,国籍=V_国籍 WHERE 作者编号=V_作者编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 作者信息删除 (
+  v_st out int,
+  V_作者编号 作者.作者编号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_作者编号))='' OR V_作者编号 IS NULL THEN v_st:=1;return;END IF;
+  
+  SELECT count(*) into cc FROM 作者 WHERE 作者编号=V_作者编号;
+  If cc=0 THEN v_st:=2;return;END IF;
+  
+  delete from 作者 WHERE 作者编号=V_作者编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 书架信息插入 (
+  v_st out int,
+  V_书架编号 书架.书架编号%type,
+  V_位置 书架.位置%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_书架编号))='' OR V_书架编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_位置))='' OR V_位置 IS NULL THEN v_st:=2;return;END IF;
+  
+  SELECT count(*) into cc FROM 书架 WHERE 书架编号=V_书架编号;
+  If cc<>0 THEN v_st:=3;return;END IF;
+  
+  insert into 书架 values(V_书架编号,V_位置);
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 书架信息修改 (
+  v_st out int,
+  V_书架编号 书架.书架编号%type,
+  V_位置 书架.位置%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_书架编号))='' OR V_书架编号 IS NULL THEN v_st:=1;return;END IF;
+  If LTrim(RTrim(V_位置))='' OR V_位置 IS NULL THEN v_st:=2;return;END IF;
+  
+  SELECT count(*) into cc FROM 书架 WHERE 书架编号=V_书架编号;
+  If cc=0 THEN v_st:=3;return;END IF;
+  
+  update 书架 set 位置=V_位置 WHERE 书架编号=V_书架编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
+
+CREATE OR REPLACE PROCEDURE 书架信息删除 (
+  v_st out int,
+  V_书架编号 书架.书架编号%type)
+AS cc int;
+BEGIN
+--检查参数值的合法性
+  If LTrim(RTrim(V_书架编号))='' OR V_书架编号 IS NULL THEN v_st:=1;return;END IF;
+  
+  SELECT count(*) into cc FROM 书架 WHERE 书架编号=V_书架编号;
+  If cc=0 THEN v_st:=2;return;END IF;
+  
+  DELETE from 书架 WHERE 书架编号=V_书架编号;
+  v_st:=0;
+Exception
+  when others then
+    v_st:=sqlcode;
+End;
+/
